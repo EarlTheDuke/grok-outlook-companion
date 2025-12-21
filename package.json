@@ -17,6 +17,7 @@
     "appId": "com.grok.outlook.companion",
     "productName": "Grok-Outlook Companion",
     "copyright": "Copyright © 2024",
+    "extends": null,
     "win": {
       "target": [
         {
@@ -47,14 +48,18 @@
       "main.js",
       "preload.js",
       "build/**/*",
-      "assets/**/*",
-      "node_modules/**/*"
+      "assets/**/*"
     ],
     "extraResources": [
       {
         "from": "node_modules/tesseract.js-core",
         "to": "tesseract.js-core"
       }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/electron-edge-js/**/*",
+      "node_modules/keytar/**/*"
     ]
   },
   "keywords": [
