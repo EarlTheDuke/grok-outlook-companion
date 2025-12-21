@@ -1,7 +1,7 @@
 {
   "name": "grok-outlook-companion",
   "version": "1.0.0",
-  "description": "Windows Electron app integrating Outlook COM with AI (Grok/Ollama/Open)",
+  "description": "AI-powered email assistant for Microsoft Outlook using Grok AI",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -9,15 +9,36 @@
     "react-start": "react-scripts start",
     "react-build": "react-scripts build",
     "build": "npm run react-build && electron-builder",
+    "build:portable": "npm run react-build && electron-builder --win portable",
     "rebuild": "electron-rebuild -f -w electron-edge-js",
     "postinstall": "electron-builder install-app-deps"
   },
   "build": {
     "appId": "com.grok.outlook.companion",
     "productName": "Grok-Outlook Companion",
+    "copyright": "Copyright © 2024",
     "win": {
-      "target": "nsis",
-      "icon": "assets/icon.ico"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Grok-Outlook Companion"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}.${ext}"
     },
     "directories": {
       "output": "dist"
@@ -28,6 +49,12 @@
       "build/**/*",
       "assets/**/*",
       "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/tesseract.js-core",
+        "to": "tesseract.js-core"
+      }
     ]
   },
   "keywords": [
@@ -35,9 +62,10 @@
     "outlook",
     "grok",
     "ai",
-    "email"
+    "email",
+    "productivity"
   ],
-  "author": "Your Name",
+  "author": "EarlTheDuke",
   "license": "MIT",
   "devDependencies": {
     "concurrently": "^8.2.2",

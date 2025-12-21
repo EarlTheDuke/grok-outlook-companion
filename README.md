@@ -1,91 +1,263 @@
-# Grok-Outlook Companion
+# 🚀 Grok-Outlook Companion
 
-A Windows Electron desktop app that integrates with Microsoft Outlook via COM API to provide AI-powered email assistance using Grok, Ollama, or custom open model APIs.
+**AI-Powered Email Assistant for Microsoft Outlook**
 
-## Features
+A Windows desktop application that integrates with Microsoft Outlook to provide intelligent email processing using Grok AI (xAI), with support for local AI models via Ollama.
 
-- **Outlook Integration**: Access Inbox and Sent Items locally via COM (no Microsoft Graph required)
-- **AI Toggle**: Switch between Grok API, local Ollama, and custom open APIs
-- **Email Tools**: Summarize emails, draft replies, extract insights
-- **System Tray**: Quick access and notifications
-- **Hotkeys**: Keyboard shortcuts for seamless workflow
+![Version](https://img.shields.io/badge/version-1.0.0-orange)
+![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-## Tech Stack
+---
 
-- **Electron** - Desktop application framework
-- **React** - UI library
-- **Material-UI** - Component library
-- **electron-edge-js** - COM interop for Outlook access
-- **keytar** - Secure credential storage
+## ✨ Features
 
-## Prerequisites
+### Core Functionality
+- **📧 Outlook Integration** - Direct access to Outlook via local COM API (no cloud/Graph API required)
+- **🤖 AI Processing** - Powered by Grok-4 (xAI) with support for Ollama local models
+- **📝 Smart Drafting** - AI-generated email replies pushed directly to Outlook
+- **📊 Email Analysis** - Summarize, extract insights, and analyze email threads
+- **📁 File Analysis** - Analyze attachments and uploaded files (PDF, Word, images, CSV)
+- **🔍 OCR Support** - Extract text from scanned documents and images
 
-- Windows 10/11
-- Node.js 18+ and npm
-- Microsoft Outlook desktop application (installed and configured)
-- Visual Studio Build Tools (for native modules)
+### Productivity Tools
+- **⚡ One-Shot Mode** - Fetch email, process with AI, and open reply in one click
+- **📋 Prompt Library** - Save, organize, and reuse custom AI prompts
+- **🏢 Context Profiles** - Personal and company context for tailored responses
+- **✏️ Quick Notes** - One-time instructions for immediate customization
+- **⌨️ Global Hotkeys** - Keyboard shortcuts that work system-wide
 
-## Installation
+### Security & Privacy
+- **🔒 Local Processing** - Outlook data accessed locally, never stored externally
+- **🔐 Secure Storage** - API keys stored in Windows Credential Manager
+- **🛡️ Sandboxed** - Full Chromium sandbox and Content Security Policy
+- **📊 Opt-in Telemetry** - Crash reporting only when you enable it
 
-1. Clone the repository:
-   ```bash
-   git clone <your-repo-url>
-   cd grok-outlook-prototype
-   ```
+---
 
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
+## 📋 System Requirements
 
-3. Rebuild native modules:
-   ```bash
-   npm run rebuild
-   ```
+| Requirement | Details |
+|-------------|---------|
+| **Operating System** | Windows 10 or Windows 11 |
+| **Outlook** | Microsoft Outlook Desktop (Classic) - must be installed and running |
+| **API Key** | Grok API key from [xAI Console](https://console.x.ai) |
+| **RAM** | 4GB minimum, 8GB recommended |
+| **Disk Space** | ~500MB for installation |
 
-## Development
+> ⚠️ **Important**: The "New Outlook" app is NOT supported. You must use Classic Outlook.
 
-Start the app in development mode:
+---
+
+## 🚀 Quick Start
+
+### For End Users (Packaged App)
+
+1. **Run the installer** or extract the portable version
+2. **Launch** Grok-Outlook Companion
+3. **Open Classic Outlook** with an email selected
+4. **Configure Settings**:
+   - Click the ⚙️ gear icon
+   - Go to "AI Provider" tab
+   - Enter your Grok API key
+   - Click "Save Settings"
+5. **Start using**: Click "Fetch Active Email" to pull in the selected email
+
+### For Developers
+
 ```bash
+# Clone the repository
+git clone https://github.com/EarlTheDuke/grok-outlook-companion.git
+cd grok-outlook-companion
+
+# Install dependencies
+npm install
+
+# Rebuild native modules
+npm run rebuild
+
+# Start in development mode
 npm run dev
 ```
 
-This will start the React development server and launch Electron.
+---
 
-## Building
+## ⌨️ Keyboard Shortcuts
 
-Create a production build:
-```bash
-npm run build
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+Shift+O` | Show/Hide window |
+| `Ctrl+Shift+G` | Fetch active email |
+| `Ctrl+Shift+S` | Quick summarize |
+| `Ctrl+Shift+D` | Quick draft reply |
+
+---
+
+## 📖 How to Use
+
+### Basic Workflow
+
+1. **Select an email** in Outlook
+2. **Click "Fetch Active Email"** in the app
+3. **Select prompts** from the Active Prompts panel
+4. **Add Quick Notes** (optional) for one-time instructions
+5. **Click "Run AI"** to process
+6. **Click "Open in Outlook"** to create a reply with the AI response
+
+### One-Shot Mode
+
+Enable the ⚡ **One Shot Mode** toggle for a streamlined workflow:
+1. Select prompts
+2. Click "⚡ ONE SHOT"
+3. The app automatically fetches the email, processes with AI, and opens the reply in Outlook
+
+### Custom Prompts
+
+1. Go to the **Prompts** tab
+2. Click **"+ New Prompt"**
+3. Enter name, description, and template
+4. Use placeholders like `{email_body}`, `{subject}`, `{sender}`
+5. Save and use in your AI actions
+
+### Context Profiles
+
+In **Settings**:
+- **About You** - Your name, role, communication style preferences
+- **Company** - Detailed company information for context-aware responses
+
+---
+
+## 🔧 Configuration
+
+### AI Provider Settings
+
+| Provider | Setup |
+|----------|-------|
+| **Grok (xAI)** | Enter API key from [console.x.ai](https://console.x.ai) |
+| **Ollama** | Install Ollama locally, runs on `localhost:11434` |
+| **Custom** | Configure any OpenAI-compatible API endpoint |
+
+### Data Storage Locations
+
+| Data | Location |
+|------|----------|
+| Settings | `%AppData%/grok-outlook-companion/ai-settings.json` |
+| Prompts | `%AppData%/grok-outlook-companion/prompts.json` |
+| API Keys | Windows Credential Manager (encrypted) |
+| Logs | `%AppData%/grok-outlook-companion/logs/` |
+
+---
+
+## 🛡️ Security Features
+
+- ✅ **Context Isolation** - Renderer process isolated from Node.js
+- ✅ **Sandbox Enabled** - Full Chromium process sandboxing
+- ✅ **CSP Headers** - Content Security Policy prevents XSS
+- ✅ **No Remote Code** - All code runs locally
+- ✅ **Secure Credentials** - API keys in Windows Credential Manager
+- ✅ **Rate Limiting** - Prevents API abuse
+- ✅ **Navigation Blocked** - Cannot navigate to external URLs
+
+### Network Access
+
+The app only connects to:
+- `api.x.ai` - Grok AI API (HTTPS)
+- `localhost:11434` - Ollama (if using local AI)
+
+---
+
+## 🐛 Troubleshooting
+
+### "Outlook Disconnected" Error
+
+1. Make sure **Classic Outlook** (not New Outlook) is open
+2. Have an email selected/open in Outlook
+3. Try clicking "Fetch Active Email" again
+
+### "Classic Outlook Not Found"
+
+1. Open Outlook desktop app
+2. If you see "New Outlook" toggle in top-right, turn it **OFF**
+3. Restart Outlook and try again
+
+### Blank/Black Screen
+
+1. Press `Ctrl+R` to refresh
+2. If persists, close and reopen the app
+3. Check logs at `%AppData%/grok-outlook-companion/logs/`
+
+### AI Not Responding
+
+1. Check your API key in Settings
+2. Verify internet connection
+3. Check if you've exceeded API rate limits
+
+---
+
+## 📁 Project Structure
+
 ```
-
-The packaged application will be in the `dist/` folder.
-
-## Project Structure
-
-```
-├── main.js           # Electron main process
-├── preload.js        # Preload script for IPC
+grok-outlook-companion/
+├── main.js                 # Electron main process (COM, AI, IPC)
+├── preload.js              # Secure bridge to renderer
+├── package.json            # Dependencies and scripts
 ├── public/
-│   └── index.html    # HTML template
+│   └── index.html          # HTML template
 ├── src/
-│   ├── index.jsx     # React entry point
-│   ├── index.css     # Global styles
-│   └── App.jsx       # Main React component
-├── assets/           # Icons and images
-└── package.json      # Dependencies and scripts
+│   ├── index.jsx           # React entry + Error Boundary
+│   ├── index.css           # Global styles
+│   ├── App.jsx             # Main React component
+│   └── components/
+│       ├── Settings.jsx    # Settings dialog
+│       ├── PromptsTab.jsx  # Prompt library
+│       ├── PromptSelector.jsx  # Active prompts panel
+│       └── FilesTab.jsx    # File analysis
+└── assets/
+    └── icon.png            # App icon
 ```
 
-## Development Steps
+---
 
-- [x] Step 1: Basic Electron + React setup
-- [ ] Step 2: COM integration for Outlook
-- [ ] Step 3: Full React UI with Settings
-- [ ] Step 4: AI processing integration
-- [ ] Step 5: Hotkeys and notifications
-- [ ] Step 6: Security and packaging
+## 📦 Building for Distribution
 
-## License
+```bash
+# Create production build
+npm run build
 
-MIT
+# Output will be in dist/ folder
+```
 
+---
+
+## 🗺️ Roadmap
+
+- [x] Outlook COM Integration
+- [x] Grok AI Processing
+- [x] Prompt Library System
+- [x] One-Shot Mode
+- [x] File Analysis & OCR
+- [x] Spell Check
+- [x] Crash Reporting
+- [ ] Recent Inbox/Sent Items tabs (coming soon)
+- [ ] Auto-updater
+- [ ] Team license management
+
+---
+
+## 📄 License
+
+MIT License - See [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- [Electron](https://www.electronjs.org/) - Desktop framework
+- [React](https://reactjs.org/) - UI library
+- [Material-UI](https://mui.com/) - Component library
+- [xAI](https://x.ai/) - Grok AI API
+- [electron-edge-js](https://github.com/nicedoc/electron-edge-js) - .NET interop
+
+---
+
+**Built with ❤️ for productivity**
