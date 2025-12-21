@@ -1,0 +1,74 @@
+{
+  "name": "grok-outlook-companion",
+  "version": "1.0.0",
+  "description": "Windows Electron app integrating Outlook COM with AI (Grok/Ollama/Open)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "concurrently \"npm run react-start\" \"wait-on http://localhost:3000 && electron .\"",
+    "react-start": "react-scripts start",
+    "react-build": "react-scripts build",
+    "build": "npm run react-build && electron-builder",
+    "rebuild": "electron-rebuild -f -w electron-edge-js",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "build": {
+    "appId": "com.grok.outlook.companion",
+    "productName": "Grok-Outlook Companion",
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "build/**/*",
+      "assets/**/*",
+      "node_modules/**/*"
+    ]
+  },
+  "keywords": [
+    "electron",
+    "outlook",
+    "grok",
+    "ai",
+    "email"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "electron": "^28.1.0",
+    "electron-builder": "^24.9.1",
+    "electron-rebuild": "^3.2.9",
+    "wait-on": "^7.2.0"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.11.3",
+    "@emotion/styled": "^11.11.0",
+    "@mui/icons-material": "^5.15.4",
+    "@mui/material": "^5.15.4",
+    "axios": "^1.6.5",
+    "csv-parse": "^6.1.0",
+    "electron-edge-js": "^29.0.0",
+    "keytar": "^7.9.0",
+    "mammoth": "^1.11.0",
+    "pdf-parse": "^1.1.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-scripts": "5.0.1",
+    "tesseract.js": "^7.0.0"
+  },
+  "browserslist": {
+    "production": [
+      "last 1 electron version"
+    ],
+    "development": [
+      "last 1 electron version"
+    ]
+  },
+  "homepage": "./"
+}
