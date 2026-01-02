@@ -43,7 +43,7 @@ import {
 
 const AI_PROVIDERS = [
   { id: 'grok', name: 'Grok (xAI)', model: 'grok-4', endpoint: 'https://api.x.ai/v1/chat/completions' },
-  { id: 'ollama', name: 'Ollama (Local)', model: 'llama3.2', endpoint: 'http://localhost:11434/api/chat' },
+  { id: 'ollama', name: 'Ollama (Local/Network)', model: 'llama3.2', endpoint: 'http://localhost:11434/api/chat', editableEndpoint: true },
   { id: 'openai', name: 'OpenAI', model: 'gpt-4', endpoint: 'https://api.openai.com/v1/chat/completions' },
   { id: 'custom', name: 'Custom API', model: '', endpoint: '' },
 ];
@@ -156,7 +156,15 @@ function Settings({ open, onClose, settings, onSaveSettings }) {
     const providerConfig = AI_PROVIDERS.find(p => p.id === provider);
     if (providerConfig && provider !== 'custom') {
       setModel(providerConfig.model);
-      setEndpoint(providerConfig.endpoint);
+      // For Ollama, only set default endpoint if current endpoint is empty or not an Ollama endpoint
+      // This preserves custom network Ollama endpoints
+      if (provider === 'ollama') {
+        if (!endpoint || !endpoint.includes('11434')) {
+          setEndpoint(providerConfig.endpoint);
+        }
+      } else {
+        setEndpoint(providerConfig.endpoint);
+      }
     }
   }, [provider]);
 
@@ -495,8 +503,21 @@ function Settings({ open, onClose, settings, onSaveSettings }) {
 
             {provider === 'ollama' && (
               <Alert severity="info" sx={{ mb: 3 }}>
-                Ollama runs locally - no API key needed! Make sure Ollama is running on your computer.
+                <strong>No API key needed!</strong> Ollama can run locally or on another computer in your network.
               </Alert>
+            )}
+
+            {/* Ollama Endpoint (editable for network access) */}
+            {provider === 'ollama' && (
+              <TextField
+                fullWidth
+                label="Ollama Server URL"
+                value={endpoint}
+                onChange={(e) => setEndpoint(e.target.value)}
+                placeholder="http://localhost:11434/api/chat"
+                helperText="Use localhost for local, or IP address for network (e.g., http://192.168.1.100:11434/api/chat)"
+                sx={{ mb: 3 }}
+              />
             )}
 
             <Divider sx={{ my: 2 }} />
@@ -511,7 +532,7 @@ function Settings({ open, onClose, settings, onSaveSettings }) {
                 provider === 'grok' 
                   ? 'e.g., grok-4, grok-3' 
                   : provider === 'ollama'
-                  ? 'e.g., llama3.2, mistral, codellama'
+                  ? 'e.g., llama3.2, mistral, codellama, qwen2.5'
                   : 'Enter the model name'
               }
               sx={{ mb: 3 }}

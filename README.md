@@ -4,7 +4,7 @@
 
 A Windows desktop application that integrates with Microsoft Outlook to provide intelligent email processing using Grok AI (xAI), with support for local AI models via Ollama.
 
-![Version](https://img.shields.io/badge/version-2.0.0-orange)
+![Version](https://img.shields.io/badge/version-2.1.0-orange)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -199,8 +199,30 @@ In **Settings**:
 | Provider | Setup |
 |----------|-------|
 | **Grok (xAI)** | Enter API key from [console.x.ai](https://console.x.ai) |
-| **Ollama** | Install Ollama locally, runs on `localhost:11434` |
+| **Ollama (Local/Network)** | Local or network Ollama server (no API key needed) |
+| **OpenAI** | Enter API key from [platform.openai.com](https://platform.openai.com) |
 | **Custom** | Configure any OpenAI-compatible API endpoint |
+
+### 🖧 Using Ollama on a Network Server (v2.1+)
+
+If you have Ollama running on another computer in your network:
+
+1. **On the Ollama server**, set it to accept network connections:
+   ```bash
+   # Linux/Mac
+   OLLAMA_HOST=0.0.0.0:11434 ollama serve
+   
+   # Windows (PowerShell as Admin)
+   [System.Environment]::SetEnvironmentVariable("OLLAMA_HOST", "0.0.0.0:11434", "Machine")
+   ```
+
+2. **In the app**, go to Settings → AI Provider:
+   - Select "Ollama (Local/Network)"
+   - Change the Server URL to: `http://192.168.x.x:11434/api/chat`
+   - Set your model name (e.g., `llama3.2`, `mistral`)
+   - Save Settings
+
+This allows you to use a powerful AI server on your network without needing internet access!
 
 ### Data Storage Locations
 
@@ -347,7 +369,12 @@ MIT License - See [LICENSE](LICENSE) file for details.
 
 ## 📝 Version History
 
-### v2.0.0 (Current)
+### v2.1.0 (Current)
+- 🖧 **Network Ollama Support** - Connect to Ollama running on another computer
+- Editable Ollama server URL in settings
+- OpenAI provider option added
+
+### v2.0.0
 - 🧠 Smart Shot Mode with automatic attachment analysis
 - 📬 Full Recent Inbox browser with filters and search
 - 👤 Contact Cards with AI-powered deep research

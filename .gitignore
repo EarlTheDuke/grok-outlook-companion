@@ -1,37 +1,17 @@
-# Dependencies
-node_modules/
+﻿# Release files
+*.zip
+*.traineddata
 
 # Build output
 dist/
 build/
-out/
 
-# Environment and secrets
-.env
-.env.local
-*.pem
+# Dependencies
+node_modules/
 
 # Logs
 *.log
-npm-debug.log*
 
 # OS files
 .DS_Store
 Thumbs.db
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Electron
-.electron/
-
-# User data (contains API keys and settings)
-userData/
-
-# Temporary files
-temp/
-tmp/
-*.tmp
