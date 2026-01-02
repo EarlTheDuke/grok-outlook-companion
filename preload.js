@@ -33,6 +33,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getEmailAttachments: (entryId) => 
     ipcRenderer.invoke('get-email-attachments', { entryId }),
   
+  // ========== Contact Lookup & Research ==========
+  lookupContact: (email) => 
+    ipcRenderer.invoke('lookup-contact', { email }),
+  
+  getEmailHistory: (email) => 
+    ipcRenderer.invoke('get-email-history', { email }),
+  
+  researchContact: (name, email, company, title) => 
+    ipcRenderer.invoke('research-contact', { name, email, company, title }),
+  
+  saveContactNotes: (email, notes, append = true) => 
+    ipcRenderer.invoke('save-contact-notes', { email, notes, append }),
+  
   // Read and extract text from a file
   readFileContent: (filePath) => 
     ipcRenderer.invoke('read-file-content', { filePath }),
@@ -74,6 +87,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('process-with-custom-prompt', { promptId, emailData }),
   processWithMultiPrompts: (promptIds, emailData, quickNotes) =>
     ipcRenderer.invoke('process-with-multi-prompts', { promptIds, emailData, quickNotes }),
+  smartShot: (emailData, promptIds, quickNotes) =>
+    ipcRenderer.invoke('smart-shot', { emailData, promptIds, quickNotes }),
   exportPrompts: () => ipcRenderer.invoke('export-prompts'),
   importPrompts: (jsonData) => ipcRenderer.invoke('import-prompts', { jsonData }),
   

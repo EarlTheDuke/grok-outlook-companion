@@ -50,6 +50,14 @@ try {
   console.warn('✗ tesseract.js not available:', e.message);
 }
 
+let xlsx = null;
+try {
+  xlsx = require('xlsx');
+  console.log('✓ xlsx loaded');
+} catch (e) {
+  console.warn('✗ xlsx not available:', e.message);
+}
+
 // ============================================================================
 // LOGGING SYSTEM
 // ============================================================================
@@ -409,6 +417,40 @@ function buildSystemPrompt() {
   return systemPrompt;
 }
 
+// Clean AI output - remove markdown formatting that could mess up emails
+function cleanAiOutput(text) {
+  if (!text) return text;
+  
+  let cleaned = text;
+  
+  // Remove angle bracket URL formatting: <http://url> or <https://url> → url
+  cleaned = cleaned.replace(/<(https?:\/\/[^>]+)>/g, '$1');
+  
+  // Remove markdown links: [text](url) → text
+  cleaned = cleaned.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+  
+  // Remove markdown bold: **text** → text
+  cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '$1');
+  
+  // Remove markdown italic: *text* → text (but not bullet points)
+  cleaned = cleaned.replace(/(?<!\n)\*([^*\n]+)\*(?!\*)/g, '$1');
+  
+  // Remove markdown code blocks: `text` → text
+  cleaned = cleaned.replace(/`([^`]+)`/g, '$1');
+  
+  // Clean up any double spaces
+  cleaned = cleaned.replace(/  +/g, ' ');
+  
+  // Clean up excessive newlines (more than 2 in a row)
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+  
+  // Trim and remove ALL trailing newlines/whitespace
+  cleaned = cleaned.trim();
+  cleaned = cleaned.replace(/[\n\r\s]+$/g, '');
+  
+  return cleaned;
+}
+
 // Main AI processing function
 async function processWithAI(prompt, emailData) {
   const provider = aiSettings.provider;
@@ -722,6 +764,39 @@ function createGetActiveEmailFunction() {
           string subject = SafeGetProperty(itemType, mailItem, "Subject", "");
           string senderName = SafeGetProperty(itemType, mailItem, "SenderName", "");
           string senderEmail = SafeGetProperty(itemType, mailItem, "SenderEmailAddress", "");
+          
+          // Try to get SMTP address if senderEmail is in Exchange format (starts with /O=)
+          if (senderEmail.StartsWith("/O=") || senderEmail.StartsWith("/o="))
+          {
+            try
+            {
+              // Try to get Sender object and resolve SMTP address
+              object sender = itemType.InvokeMember("Sender", BindingFlags.GetProperty, null, mailItem, null);
+              if (sender != null)
+              {
+                Type senderType = sender.GetType();
+                try
+                {
+                  // Try GetExchangeUser
+                  object exchUser = senderType.InvokeMember("GetExchangeUser", BindingFlags.InvokeMethod, null, sender, null);
+                  if (exchUser != null)
+                  {
+                    Type exchType = exchUser.GetType();
+                    string smtpAddr = (string)exchType.InvokeMember("PrimarySmtpAddress", BindingFlags.GetProperty, null, exchUser, null);
+                    if (!string.IsNullOrEmpty(smtpAddr))
+                    {
+                      senderEmail = smtpAddr;
+                    }
+                    Marshal.ReleaseComObject(exchUser);
+                  }
+                }
+                catch { }
+                Marshal.ReleaseComObject(sender);
+              }
+            }
+            catch { }
+          }
+          
           DateTime receivedTime = SafeGetDateProperty(itemType, mailItem, "ReceivedTime");
           string body = SafeGetProperty(itemType, mailItem, "Body", "");
           string bodyHtml = SafeGetProperty(itemType, mailItem, "HTMLBody", "");
@@ -941,12 +1016,22 @@ function createGetRecentEmailsFunction(folderType) {
                 DateTime sentOn = SafeGetDateProperty(itemType, item, "SentOn");
                 string body = SafeGetProperty(itemType, item, "Body", "");
                 string to = SafeGetProperty(itemType, item, "To", "");
+                string cc = SafeGetProperty(itemType, item, "CC", "");
                 string entryId = SafeGetProperty(itemType, item, "EntryID", "");
+                string conversationId = SafeGetProperty(itemType, item, "ConversationID", "");
+                string categories = SafeGetProperty(itemType, item, "Categories", "");
                 bool unRead = SafeGetBoolProperty(itemType, item, "UnRead", false);
-                string importance = SafeGetProperty(itemType, item, "Importance", "1");
+                string importanceStr = SafeGetProperty(itemType, item, "Importance", "1");
+                
+                // Parse importance (0=low, 1=normal, 2=high)
+                string importanceLevel = "normal";
+                if (importanceStr == "0") importanceLevel = "low";
+                else if (importanceStr == "2") importanceLevel = "high";
 
-                // Truncate body for preview
-                string bodyPreview = body.Length > 200 ? body.Substring(0, 200) + "..." : body;
+                // Truncate body for preview (clean up whitespace)
+                string bodyPreview = body.Replace("\\r\\n", " ").Replace("\\n", " ").Replace("\\r", " ");
+                bodyPreview = System.Text.RegularExpressions.Regex.Replace(bodyPreview, @"\\s+", " ").Trim();
+                bodyPreview = bodyPreview.Length > 250 ? bodyPreview.Substring(0, 250) + "..." : bodyPreview;
 
                 // Get attachment count
                 int attachmentCount = 0;
@@ -962,19 +1047,31 @@ function createGetRecentEmailsFunction(folderType) {
                   }
                 }
                 catch { }
+                
+                // Extract sender domain for filtering
+                string senderDomain = "";
+                if (!string.IsNullOrEmpty(senderEmail) && senderEmail.Contains("@"))
+                {
+                  senderDomain = senderEmail.Substring(senderEmail.LastIndexOf("@") + 1).ToLower();
+                }
 
                 emails.Add(new {
                   subject = subject,
                   senderName = senderName,
                   senderEmail = senderEmail,
+                  senderDomain = senderDomain,
                   receivedTime = receivedTime.ToString("o"),
                   sentOn = sentOn.ToString("o"),
                   bodyPreview = bodyPreview,
                   to = to,
+                  cc = cc,
                   hasAttachments = attachmentCount > 0,
-                  importance = importance,
+                  attachmentCount = attachmentCount,
+                  importance = importanceLevel,
                   isRead = !unRead,
-                  entryId = entryId
+                  entryId = entryId,
+                  conversationId = conversationId,
+                  categories = categories
                 });
                 count++;
               }
@@ -1127,23 +1224,66 @@ function createReplyInOutlook() {
 
           Type replyType = replyItem.GetType();
           
-          // Get the existing body (which includes the original message)
-          string existingBody = "";
+          // Get the existing HTML body (preserves all original formatting)
+          string existingHtmlBody = "";
           try
           {
-            existingBody = (string)replyType.InvokeMember("Body", 
+            existingHtmlBody = (string)replyType.InvokeMember("HTMLBody", 
               BindingFlags.GetProperty, null, replyItem, null);
           }
           catch { }
 
-          // Set the new body with our AI draft + original content
-          string newBody = replyBody + "\\n\\n" + existingBody;
-          replyType.InvokeMember("Body", 
-            BindingFlags.SetProperty, null, replyItem, new object[] { newBody });
+          // Convert AI reply text to HTML (preserve line breaks, escape HTML chars)
+          string htmlReply = System.Net.WebUtility.HtmlEncode(replyBody)
+            .Replace("\\r\\n", "<br>")
+            .Replace("\\n", "<br>")
+            .Replace("\\r", "");
+          
+          // Remove any trailing <br> tags to prevent extra spacing before signature
+          while (htmlReply.EndsWith("<br>"))
+          {
+            htmlReply = htmlReply.Substring(0, htmlReply.Length - 4);
+          }
+          
+          // Wrap AI reply in a span (inline, no block spacing at all)
+          string aiHtmlBlock = "<span style=\\"font-family: Calibri, Arial, sans-serif; font-size: 11pt;\\">" + 
+            htmlReply + "</span>";
+          
+          // Find where to insert (after <body> tag if present)
+          string newHtmlBody;
+          int bodyTagIndex = existingHtmlBody.IndexOf("<body", StringComparison.OrdinalIgnoreCase);
+          
+          if (bodyTagIndex >= 0)
+          {
+            // Find the end of the <body> tag
+            int bodyTagEnd = existingHtmlBody.IndexOf(">", bodyTagIndex);
+            if (bodyTagEnd >= 0)
+            {
+              // Insert AI reply right after <body...>
+              newHtmlBody = existingHtmlBody.Substring(0, bodyTagEnd + 1) + 
+                aiHtmlBlock + 
+                existingHtmlBody.Substring(bodyTagEnd + 1);
+            }
+            else
+            {
+              // Fallback: prepend
+              newHtmlBody = aiHtmlBlock + existingHtmlBody;
+            }
+          }
+          else
+          {
+            // No body tag found, just prepend
+            newHtmlBody = aiHtmlBlock + existingHtmlBody;
+          }
+          
+          // Set the HTML body (preserves original message formatting)
+          replyType.InvokeMember("HTMLBody", 
+            BindingFlags.SetProperty, null, replyItem, new object[] { newHtmlBody });
 
           // Display the reply (opens it in Outlook for user to review/send)
+          // Using false = non-modal, so it doesn't block waiting for user to close
           replyType.InvokeMember("Display", 
-            BindingFlags.InvokeMethod, null, replyItem, new object[] { true });
+            BindingFlags.InvokeMethod, null, replyItem, new object[] { false });
 
           return new {
             success = true,
@@ -1237,9 +1377,9 @@ function createNewEmailInOutlook() {
           mailType.InvokeMember("Body", 
             BindingFlags.SetProperty, null, mailItem, new object[] { body });
 
-          // Display the email
+          // Display the email (non-modal so it doesn't block)
           mailType.InvokeMember("Display", 
-            BindingFlags.InvokeMethod, null, mailItem, new object[] { true });
+            BindingFlags.InvokeMethod, null, mailItem, new object[] { false });
 
           return new {
             success = true,
@@ -1433,6 +1573,591 @@ function createGetAttachmentsFunction() {
         finally
         {
           if (mailItem != null) Marshal.ReleaseComObject(mailItem);
+          if (ns != null) Marshal.ReleaseComObject(ns);
+          if (outlookApp != null) Marshal.ReleaseComObject(outlookApp);
+        }
+      }
+    }
+  `);
+}
+
+// Lookup contact by email address
+function createContactLookupFunction() {
+  if (!edge) return null;
+  
+  return edge.func(`
+    using System;
+    using System.Collections.Generic;
+    using System.Threading.Tasks;
+    using System.Runtime.InteropServices;
+    using System.Reflection;
+
+    public class Startup
+    {
+      public async Task<object> Invoke(dynamic input)
+      {
+        object outlookApp = null;
+        object ns = null;
+        object contactsFolder = null;
+
+        try
+        {
+          string emailAddress = (string)input.email;
+          
+          if (string.IsNullOrEmpty(emailAddress))
+          {
+            return new {
+              success = false,
+              found = false,
+              message = "Email address is required",
+              contact = (object)null
+            };
+          }
+
+          // Get running Outlook instance
+          try
+          {
+            outlookApp = Marshal.GetActiveObject("Outlook.Application");
+          }
+          catch (COMException)
+          {
+            return new {
+              success = false,
+              found = false,
+              message = "Outlook is not running.",
+              contact = (object)null
+            };
+          }
+
+          Type outlookType = outlookApp.GetType();
+          ns = outlookType.InvokeMember("GetNamespace", 
+            BindingFlags.InvokeMethod, null, outlookApp, new object[] { "MAPI" });
+
+          Type nsType = ns.GetType();
+          
+          // Get Contacts folder (olFolderContacts = 10)
+          contactsFolder = nsType.InvokeMember("GetDefaultFolder", 
+            BindingFlags.InvokeMethod, null, ns, new object[] { 10 });
+
+          if (contactsFolder == null)
+          {
+            return new {
+              success = true,
+              found = false,
+              message = "No contacts folder",
+              contact = (object)null
+            };
+          }
+
+          Type folderType = contactsFolder.GetType();
+          object items = folderType.InvokeMember("Items", 
+            BindingFlags.GetProperty, null, contactsFolder, null);
+
+          Type itemsType = items.GetType();
+          
+          // Search for contact by email
+          string filter = "[Email1Address] = '" + emailAddress.Replace("'", "''") + "' OR " +
+                         "[Email2Address] = '" + emailAddress.Replace("'", "''") + "' OR " +
+                         "[Email3Address] = '" + emailAddress.Replace("'", "''") + "'";
+          
+          object contact = null;
+          try
+          {
+            contact = itemsType.InvokeMember("Find", 
+              BindingFlags.InvokeMethod, null, items, new object[] { filter });
+          }
+          catch { }
+
+          if (contact == null)
+          {
+            // Try Global Address List
+            try
+            {
+              object addressLists = nsType.InvokeMember("AddressLists", 
+                BindingFlags.GetProperty, null, ns, null);
+              Type alType = addressLists.GetType();
+              int alCount = (int)alType.InvokeMember("Count", 
+                BindingFlags.GetProperty, null, addressLists, null);
+              
+              for (int i = 1; i <= alCount && contact == null; i++)
+              {
+                object addressList = alType.InvokeMember("Item", 
+                  BindingFlags.GetProperty, null, addressLists, new object[] { i });
+                Type listType = addressList.GetType();
+                
+                object entries = listType.InvokeMember("AddressEntries", 
+                  BindingFlags.GetProperty, null, addressList, null);
+                Type entriesType = entries.GetType();
+                int entryCount = (int)entriesType.InvokeMember("Count", 
+                  BindingFlags.GetProperty, null, entries, null);
+                
+                for (int j = 1; j <= entryCount && contact == null; j++)
+                {
+                  try
+                  {
+                    object entry = entriesType.InvokeMember("Item", 
+                      BindingFlags.GetProperty, null, entries, new object[] { j });
+                    Type entryType = entry.GetType();
+                    
+                    string address = "";
+                    try
+                    {
+                      address = (string)entryType.InvokeMember("Address", 
+                        BindingFlags.GetProperty, null, entry, null);
+                    }
+                    catch { }
+                    
+                    if (address.ToLower() == emailAddress.ToLower())
+                    {
+                      // Found in GAL - get what info we can
+                      string name = "";
+                      string company = "";
+                      string title = "";
+                      string phone = "";
+                      string dept = "";
+                      
+                      try { name = (string)entryType.InvokeMember("Name", BindingFlags.GetProperty, null, entry, null); } catch { }
+                      
+                      // Try to get exchange user details
+                      try
+                      {
+                        object exchUser = entryType.InvokeMember("GetExchangeUser", BindingFlags.InvokeMethod, null, entry, null);
+                        if (exchUser != null)
+                        {
+                          Type exchType = exchUser.GetType();
+                          try { company = (string)exchType.InvokeMember("CompanyName", BindingFlags.GetProperty, null, exchUser, null); } catch { }
+                          try { title = (string)exchType.InvokeMember("JobTitle", BindingFlags.GetProperty, null, exchUser, null); } catch { }
+                          try { phone = (string)exchType.InvokeMember("BusinessTelephoneNumber", BindingFlags.GetProperty, null, exchUser, null); } catch { }
+                          try { dept = (string)exchType.InvokeMember("Department", BindingFlags.GetProperty, null, exchUser, null); } catch { }
+                          Marshal.ReleaseComObject(exchUser);
+                        }
+                      }
+                      catch { }
+                      
+                      Marshal.ReleaseComObject(entry);
+                      Marshal.ReleaseComObject(entries);
+                      Marshal.ReleaseComObject(addressList);
+                      Marshal.ReleaseComObject(addressLists);
+                      
+                      return new {
+                        success = true,
+                        found = true,
+                        source = "GAL",
+                        message = "Found in Global Address List",
+                        contact = new {
+                          fullName = name ?? "",
+                          email = emailAddress,
+                          jobTitle = title ?? "",
+                          company = company ?? "",
+                          department = dept ?? "",
+                          phoneMobile = "",
+                          phoneWork = phone ?? "",
+                          phoneHome = "",
+                          address = "",
+                          notes = "",
+                          categories = ""
+                        }
+                      };
+                    }
+                    
+                    Marshal.ReleaseComObject(entry);
+                  }
+                  catch { }
+                }
+                
+                Marshal.ReleaseComObject(entries);
+                Marshal.ReleaseComObject(addressList);
+              }
+              
+              Marshal.ReleaseComObject(addressLists);
+            }
+            catch { }
+            
+            Marshal.ReleaseComObject(items);
+            
+            return new {
+              success = true,
+              found = false,
+              message = "Contact not found",
+              contact = (object)null
+            };
+          }
+
+          // Found contact - extract info
+          Type contactType = contact.GetType();
+          
+          string fullName = "";
+          string email1 = "";
+          string jobTitle = "";
+          string companyName = "";
+          string department = "";
+          string mobileTel = "";
+          string businessTel = "";
+          string homeTel = "";
+          string businessAddr = "";
+          string notes = "";
+          string categories = "";
+          
+          try { fullName = (string)contactType.InvokeMember("FullName", BindingFlags.GetProperty, null, contact, null); } catch { }
+          try { email1 = (string)contactType.InvokeMember("Email1Address", BindingFlags.GetProperty, null, contact, null); } catch { }
+          try { jobTitle = (string)contactType.InvokeMember("JobTitle", BindingFlags.GetProperty, null, contact, null); } catch { }
+          try { companyName = (string)contactType.InvokeMember("CompanyName", BindingFlags.GetProperty, null, contact, null); } catch { }
+          try { department = (string)contactType.InvokeMember("Department", BindingFlags.GetProperty, null, contact, null); } catch { }
+          try { mobileTel = (string)contactType.InvokeMember("MobileTelephoneNumber", BindingFlags.GetProperty, null, contact, null); } catch { }
+          try { businessTel = (string)contactType.InvokeMember("BusinessTelephoneNumber", BindingFlags.GetProperty, null, contact, null); } catch { }
+          try { homeTel = (string)contactType.InvokeMember("HomeTelephoneNumber", BindingFlags.GetProperty, null, contact, null); } catch { }
+          try { businessAddr = (string)contactType.InvokeMember("BusinessAddress", BindingFlags.GetProperty, null, contact, null); } catch { }
+          try { notes = (string)contactType.InvokeMember("Body", BindingFlags.GetProperty, null, contact, null); } catch { }
+          try { categories = (string)contactType.InvokeMember("Categories", BindingFlags.GetProperty, null, contact, null); } catch { }
+          
+          Marshal.ReleaseComObject(contact);
+          Marshal.ReleaseComObject(items);
+          
+          return new {
+            success = true,
+            found = true,
+            source = "Contacts",
+            message = "Contact found",
+            contact = new {
+              fullName = fullName ?? "",
+              email = email1 ?? emailAddress,
+              jobTitle = jobTitle ?? "",
+              company = companyName ?? "",
+              department = department ?? "",
+              phoneMobile = mobileTel ?? "",
+              phoneWork = businessTel ?? "",
+              phoneHome = homeTel ?? "",
+              address = businessAddr ?? "",
+              notes = notes ?? "",
+              categories = categories ?? ""
+            }
+          };
+        }
+        catch (Exception ex)
+        {
+          return new {
+            success = false,
+            found = false,
+            message = "Error: " + ex.Message,
+            contact = (object)null
+          };
+        }
+        finally
+        {
+          if (contactsFolder != null) Marshal.ReleaseComObject(contactsFolder);
+          if (ns != null) Marshal.ReleaseComObject(ns);
+          if (outlookApp != null) Marshal.ReleaseComObject(outlookApp);
+        }
+      }
+    }
+  `);
+}
+
+// Get email history count with a contact
+function createEmailHistoryFunction() {
+  if (!edge) return null;
+  
+  return edge.func(`
+    using System;
+    using System.Threading.Tasks;
+    using System.Runtime.InteropServices;
+    using System.Reflection;
+
+    public class Startup
+    {
+      public async Task<object> Invoke(dynamic input)
+      {
+        object outlookApp = null;
+        object ns = null;
+        object inbox = null;
+        object sent = null;
+
+        try
+        {
+          string emailAddress = (string)input.email;
+          
+          if (string.IsNullOrEmpty(emailAddress))
+          {
+            return new {
+              success = false,
+              totalCount = 0,
+              inboxCount = 0,
+              sentCount = 0,
+              lastEmailDate = ""
+            };
+          }
+
+          try
+          {
+            outlookApp = Marshal.GetActiveObject("Outlook.Application");
+          }
+          catch (COMException)
+          {
+            return new {
+              success = false,
+              totalCount = 0,
+              inboxCount = 0,
+              sentCount = 0,
+              lastEmailDate = ""
+            };
+          }
+
+          Type outlookType = outlookApp.GetType();
+          ns = outlookType.InvokeMember("GetNamespace", 
+            BindingFlags.InvokeMethod, null, outlookApp, new object[] { "MAPI" });
+
+          Type nsType = ns.GetType();
+          
+          int inboxCount = 0;
+          int sentCount = 0;
+          DateTime lastDate = DateTime.MinValue;
+          
+          // Search Inbox
+          inbox = nsType.InvokeMember("GetDefaultFolder", 
+            BindingFlags.InvokeMethod, null, ns, new object[] { 6 }); // olFolderInbox
+          
+          Type folderType = inbox.GetType();
+          object inboxItems = folderType.InvokeMember("Items", 
+            BindingFlags.GetProperty, null, inbox, null);
+          
+          Type itemsType = inboxItems.GetType();
+          string filter = "[SenderEmailAddress] = '" + emailAddress.Replace("'", "''") + "'";
+          
+          object restricted = itemsType.InvokeMember("Restrict", 
+            BindingFlags.InvokeMethod, null, inboxItems, new object[] { filter });
+          
+          Type restrictedType = restricted.GetType();
+          inboxCount = (int)restrictedType.InvokeMember("Count", 
+            BindingFlags.GetProperty, null, restricted, null);
+          
+          // Get last email date from inbox
+          if (inboxCount > 0)
+          {
+            restrictedType.InvokeMember("Sort", 
+              BindingFlags.InvokeMethod, null, restricted, new object[] { "[ReceivedTime]", true });
+            
+            object lastItem = restrictedType.InvokeMember("GetFirst", 
+              BindingFlags.InvokeMethod, null, restricted, null);
+            if (lastItem != null)
+            {
+              Type lastType = lastItem.GetType();
+              try
+              {
+                lastDate = (DateTime)lastType.InvokeMember("ReceivedTime", 
+                  BindingFlags.GetProperty, null, lastItem, null);
+              }
+              catch { }
+              Marshal.ReleaseComObject(lastItem);
+            }
+          }
+          
+          Marshal.ReleaseComObject(restricted);
+          Marshal.ReleaseComObject(inboxItems);
+          
+          // Search Sent Items
+          sent = nsType.InvokeMember("GetDefaultFolder", 
+            BindingFlags.InvokeMethod, null, ns, new object[] { 5 }); // olFolderSentMail
+          
+          Type sentFolderType = sent.GetType();
+          object sentItems = sentFolderType.InvokeMember("Items", 
+            BindingFlags.GetProperty, null, sent, null);
+          
+          Type sentItemsType = sentItems.GetType();
+          
+          // For sent items, we need to check recipients
+          int sentTotal = (int)sentItemsType.InvokeMember("Count", 
+            BindingFlags.GetProperty, null, sentItems, null);
+          
+          // Simple approach: count last 200 sent items that match
+          int checkLimit = Math.Min(200, sentTotal);
+          sentItemsType.InvokeMember("Sort", 
+            BindingFlags.InvokeMethod, null, sentItems, new object[] { "[SentOn]", true });
+          
+          for (int i = 1; i <= checkLimit; i++)
+          {
+            try
+            {
+              object item = sentItemsType.InvokeMember("Item", 
+                BindingFlags.GetProperty, null, sentItems, new object[] { i });
+              
+              Type itemType = item.GetType();
+              object recipients = itemType.InvokeMember("Recipients", 
+                BindingFlags.GetProperty, null, item, null);
+              
+              Type recipType = recipients.GetType();
+              int recipCount = (int)recipType.InvokeMember("Count", 
+                BindingFlags.GetProperty, null, recipients, null);
+              
+              bool found = false;
+              for (int j = 1; j <= recipCount && !found; j++)
+              {
+                object recip = recipType.InvokeMember("Item", 
+                  BindingFlags.GetProperty, null, recipients, new object[] { j });
+                Type rType = recip.GetType();
+                
+                string addr = "";
+                try
+                {
+                  addr = (string)rType.InvokeMember("Address", 
+                    BindingFlags.GetProperty, null, recip, null);
+                }
+                catch { }
+                
+                if (addr.ToLower() == emailAddress.ToLower())
+                {
+                  found = true;
+                  sentCount++;
+                  
+                  DateTime sentDate = DateTime.MinValue;
+                  try
+                  {
+                    sentDate = (DateTime)itemType.InvokeMember("SentOn", 
+                      BindingFlags.GetProperty, null, item, null);
+                  }
+                  catch { }
+                  
+                  if (sentDate > lastDate)
+                  {
+                    lastDate = sentDate;
+                  }
+                }
+                
+                Marshal.ReleaseComObject(recip);
+              }
+              
+              Marshal.ReleaseComObject(recipients);
+              Marshal.ReleaseComObject(item);
+            }
+            catch { }
+          }
+          
+          Marshal.ReleaseComObject(sentItems);
+          
+          return new {
+            success = true,
+            totalCount = inboxCount + sentCount,
+            inboxCount = inboxCount,
+            sentCount = sentCount,
+            lastEmailDate = lastDate != DateTime.MinValue ? lastDate.ToString("yyyy-MM-dd") : ""
+          };
+        }
+        catch (Exception ex)
+        {
+          return new {
+            success = false,
+            totalCount = 0,
+            inboxCount = 0,
+            sentCount = 0,
+            lastEmailDate = "",
+            error = ex.Message
+          };
+        }
+        finally
+        {
+          if (sent != null) Marshal.ReleaseComObject(sent);
+          if (inbox != null) Marshal.ReleaseComObject(inbox);
+          if (ns != null) Marshal.ReleaseComObject(ns);
+          if (outlookApp != null) Marshal.ReleaseComObject(outlookApp);
+        }
+      }
+    }
+  `);
+}
+
+// Save notes to a contact
+function createSaveContactNotesFunction() {
+  if (!edge) return null;
+  
+  return edge.func(`
+    using System;
+    using System.Threading.Tasks;
+    using System.Runtime.InteropServices;
+    using System.Reflection;
+
+    public class Startup
+    {
+      public async Task<object> Invoke(dynamic input)
+      {
+        object outlookApp = null;
+        object ns = null;
+        object contactsFolder = null;
+
+        try
+        {
+          string emailAddress = (string)input.email;
+          string notes = (string)input.notes;
+          bool append = (bool)input.append;
+          
+          if (string.IsNullOrEmpty(emailAddress))
+          {
+            return new { success = false, message = "Email address is required" };
+          }
+
+          try
+          {
+            outlookApp = Marshal.GetActiveObject("Outlook.Application");
+          }
+          catch (COMException)
+          {
+            return new { success = false, message = "Outlook is not running." };
+          }
+
+          Type outlookType = outlookApp.GetType();
+          ns = outlookType.InvokeMember("GetNamespace", 
+            BindingFlags.InvokeMethod, null, outlookApp, new object[] { "MAPI" });
+
+          Type nsType = ns.GetType();
+          contactsFolder = nsType.InvokeMember("GetDefaultFolder", 
+            BindingFlags.InvokeMethod, null, ns, new object[] { 10 });
+
+          Type folderType = contactsFolder.GetType();
+          object items = folderType.InvokeMember("Items", 
+            BindingFlags.GetProperty, null, contactsFolder, null);
+
+          Type itemsType = items.GetType();
+          string filter = "[Email1Address] = '" + emailAddress.Replace("'", "''") + "' OR " +
+                         "[Email2Address] = '" + emailAddress.Replace("'", "''") + "' OR " +
+                         "[Email3Address] = '" + emailAddress.Replace("'", "''") + "'";
+          
+          object contact = itemsType.InvokeMember("Find", 
+            BindingFlags.InvokeMethod, null, items, new object[] { filter });
+
+          if (contact == null)
+          {
+            Marshal.ReleaseComObject(items);
+            return new { success = false, message = "Contact not found" };
+          }
+
+          Type contactType = contact.GetType();
+          
+          string existingNotes = "";
+          try
+          {
+            existingNotes = (string)contactType.InvokeMember("Body", 
+              BindingFlags.GetProperty, null, contact, null) ?? "";
+          }
+          catch { }
+          
+          string newNotes = append ? existingNotes + "\\n\\n--- AI Research " + DateTime.Now.ToString("yyyy-MM-dd HH:mm") + " ---\\n" + notes : notes;
+          
+          contactType.InvokeMember("Body", 
+            BindingFlags.SetProperty, null, contact, new object[] { newNotes });
+          
+          contactType.InvokeMember("Save", 
+            BindingFlags.InvokeMethod, null, contact, null);
+          
+          Marshal.ReleaseComObject(contact);
+          Marshal.ReleaseComObject(items);
+          
+          return new { success = true, message = "Notes saved to contact" };
+        }
+        catch (Exception ex)
+        {
+          return new { success = false, message = "Error: " + ex.Message };
+        }
+        finally
+        {
+          if (contactsFolder != null) Marshal.ReleaseComObject(contactsFolder);
           if (ns != null) Marshal.ReleaseComObject(ns);
           if (outlookApp != null) Marshal.ReleaseComObject(outlookApp);
         }
@@ -2180,7 +2905,7 @@ ipcMain.handle('get-active-email', async () => {
   }
 });
 
-// Get recent emails from Inbox
+// Get recent emails from Inbox (enhanced for full metadata)
 ipcMain.handle('get-recent-inbox', async (event, options = {}) => {
   if (!outlookFunctions) {
     return {
@@ -2192,6 +2917,7 @@ ipcMain.handle('get-recent-inbox', async (event, options = {}) => {
   }
 
   try {
+    logger.info('Fetching inbox', options);
     const params = {
       maxItems: options.maxItems || 50,
       daysBack: options.daysBack || 365,
@@ -2316,7 +3042,15 @@ ipcMain.handle('create-reply-in-outlook', async (event, { entryId, replyBody, re
     };
   }
   
-  logger.info('Creating reply in Outlook', { entryId: entryId?.substring(0, 20) + '...', replyAll });
+  // Clean AI output - remove markdown formatting before sending to Outlook
+  const cleanedReplyBody = cleanAiOutput(replyBody);
+  
+  logger.info('Creating reply in Outlook', { 
+    entryId: entryId?.substring(0, 20) + '...', 
+    replyAll,
+    originalLength: replyBody.length,
+    cleanedLength: cleanedReplyBody.length 
+  });
   
   if (!edge) {
     return {
@@ -2335,7 +3069,7 @@ ipcMain.handle('create-reply-in-outlook', async (event, { entryId, replyBody, re
     }
     
     const result = await new Promise((resolve, reject) => {
-      createReply({ entryId, replyBody, replyAll }, (error, result) => {
+      createReply({ entryId, replyBody: cleanedReplyBody, replyAll }, (error, result) => {
         if (error) {
           reject(error);
         } else {
@@ -2427,7 +3161,7 @@ const DEFAULT_PROMPTS = [
     id: 'core-reply',
     name: 'Draft Reply',
     description: 'Draft a reply to this email',
-    template: 'Please draft a reply to this email. Only write the body of the reply - do NOT include a subject line, greeting line like "Subject:", or email headers.\n\nOriginal email from {sender}:\n{email_body}',
+    template: 'Please draft a professional reply to this email.\n\nIMPORTANT FORMATTING RULES:\n- Write ONLY the reply body text\n- Do NOT include subject line, email headers, or "Subject:" prefix\n- Do NOT include a signature (it will be added automatically)\n- Do NOT use markdown formatting (no **, *, [], or <>)\n- Do NOT wrap URLs in brackets or angle brackets\n- Write in plain text format\n\nOriginal email from {sender}:\n{email_body}',
     category: 'reply',
     isFavorite: true,
     usageCount: 0,
@@ -3006,6 +3740,266 @@ ipcMain.handle('process-with-multi-prompts', async (event, { promptIds, emailDat
   }
 });
 
+// IPC: Smart Shot - Process email with attachment analysis
+ipcMain.handle('smart-shot', async (event, { emailData, promptIds, quickNotes }) => {
+  try {
+    logger.info('Smart Shot initiated', { 
+      entryId: emailData?.entryId?.substring(0, 20),
+      promptCount: promptIds?.length 
+    });
+    
+    const results = {
+      attachmentSummaries: [],
+      aiResult: null,
+      usedPrompts: [],
+      hadQuickNotes: false,
+    };
+    
+    // Step 1: Extract attachments
+    logger.info('Smart Shot: Extracting attachments...');
+    let attachments = [];
+    
+    if (emailData?.entryId) {
+      const getAttachments = createGetAttachmentsFunction();
+      if (getAttachments) {
+        // Use the same TEMP_FOLDER constant used elsewhere
+        const tempFolder = path.join(require('os').tmpdir(), 'grok-outlook-attachments');
+        if (!fs.existsSync(tempFolder)) {
+          fs.mkdirSync(tempFolder, { recursive: true });
+        }
+        
+        logger.info('Smart Shot: Using temp folder', { tempFolder });
+        
+        const attachResult = await new Promise((resolve, reject) => {
+          getAttachments({ entryId: emailData.entryId, tempFolder }, (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          });
+        });
+        
+        if (attachResult.success && attachResult.attachments) {
+          attachments = attachResult.attachments;
+          logger.info('Smart Shot: Attachments extracted', { 
+            count: attachments.length,
+            files: attachments.map(a => a.name)
+          });
+        } else {
+          logger.info('Smart Shot: No attachments found or extraction failed', { 
+            success: attachResult.success, 
+            message: attachResult.message 
+          });
+        }
+      }
+    }
+    
+    // Step 2: Process each attachment and extract key info
+    if (attachments.length > 0) {
+      for (let i = 0; i < attachments.length; i++) {
+        const attachment = attachments[i];
+        
+        // C# returns: fileName, savedPath, size, extension
+        const attachName = attachment.fileName || attachment.name;
+        const attachPath = attachment.savedPath || attachment.tempPath;
+        
+        // Defensive check for attachment properties
+        if (!attachment || !attachName || !attachPath) {
+          logger.warn('Smart Shot: Skipping invalid attachment', { attachment });
+          continue;
+        }
+        
+        // Get extension early so it's available in catch block
+        const ext = path.extname(attachName || '').toLowerCase();
+        
+        logger.info(`Smart Shot: Processing attachment ${i + 1}/${attachments.length}`, { 
+          name: attachName,
+          path: attachPath,
+          ext: ext
+        });
+        
+        try {
+          // Read the file content
+          let fileContent = '';
+          const filePath = attachPath;
+          
+          // Extract text based on file type
+          if (ext === '.pdf') {
+            if (pdfParse) {
+              const dataBuffer = fs.readFileSync(filePath);
+              const pdfData = await pdfParse(dataBuffer);
+              fileContent = pdfData.text || '';
+              
+              // If PDF has little text, might be scanned - try OCR
+              if (fileContent.trim().length < 100 && Tesseract) {
+                logger.info('Smart Shot: PDF appears scanned, attempting OCR...');
+                const ocrResult = await Tesseract.recognize(filePath, 'eng');
+                fileContent = ocrResult.data.text || fileContent;
+              }
+            }
+          } else if (ext === '.docx' || ext === '.doc') {
+            if (mammoth) {
+              const result = await mammoth.extractRawText({ path: filePath });
+              fileContent = result.value || '';
+            }
+          } else if (ext === '.txt' || ext === '.md') {
+            fileContent = fs.readFileSync(filePath, 'utf8');
+          } else if (ext === '.csv') {
+            fileContent = fs.readFileSync(filePath, 'utf8');
+          } else if (ext === '.xlsx' || ext === '.xls') {
+            // Excel files
+            if (xlsx) {
+              const workbook = xlsx.readFile(filePath);
+              const sheetNames = workbook.SheetNames;
+              let excelContent = '';
+              
+              // Process each sheet
+              for (const sheetName of sheetNames) {
+                const sheet = workbook.Sheets[sheetName];
+                const csvData = xlsx.utils.sheet_to_csv(sheet);
+                excelContent += `\n--- Sheet: ${sheetName} ---\n${csvData}`;
+              }
+              
+              fileContent = excelContent.trim();
+              logger.info('Smart Shot: Excel file processed', { 
+                sheets: sheetNames.length, 
+                chars: fileContent.length 
+              });
+            }
+          } else if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'].includes(ext)) {
+            // Image - use OCR
+            if (Tesseract) {
+              const ocrResult = await Tesseract.recognize(filePath, 'eng');
+              fileContent = ocrResult.data.text || '';
+            }
+          }
+          
+          // Limit content size (5000 chars max per file)
+          if (fileContent.length > 5000) {
+            fileContent = fileContent.substring(0, 5000) + '\n... [truncated]';
+          }
+          
+          // Skip if no content extracted
+          if (!fileContent.trim()) {
+            results.attachmentSummaries.push({
+              filename: attachName,
+              summary: '[Could not extract text from this file]',
+              type: ext,
+            });
+            continue;
+          }
+          
+          // Extract key info using AI
+          const keyInfoPrompt = `Extract the key information from this document. Provide a concise summary with bullet points highlighting the most important facts, figures, dates, names, and action items.
+
+Document name: ${attachName}
+Document type: ${ext}
+
+--- DOCUMENT CONTENT ---
+${fileContent}
+--- END DOCUMENT ---
+
+Provide key information in bullet points (max 10 bullets):`;
+
+          const keyInfoResult = await processWithAI(keyInfoPrompt, null);
+          
+          results.attachmentSummaries.push({
+            filename: attachName,
+            summary: keyInfoResult.success ? keyInfoResult.content : '[Error extracting key info]',
+            type: ext,
+            charCount: fileContent.length,
+          });
+          
+        } catch (attachError) {
+          logger.error('Smart Shot: Error processing attachment', { 
+            name: attachName, 
+            error: attachError.message 
+          });
+          results.attachmentSummaries.push({
+            filename: attachName || 'Unknown',
+            summary: `[Error: ${attachError.message}]`,
+            type: ext || 'unknown',
+          });
+        }
+      }
+    }
+    
+    // Step 3: Build combined context with attachments
+    let attachmentContext = '';
+    if (results.attachmentSummaries.length > 0) {
+      attachmentContext = '\n\n--- ATTACHMENT SUMMARIES ---\n';
+      for (const att of results.attachmentSummaries) {
+        attachmentContext += `\n📄 File: ${att.filename}\nKey Information:\n${att.summary}\n`;
+      }
+      attachmentContext += '\n--- END ATTACHMENTS ---\n';
+      attachmentContext += '\nPlease consider both the email content AND the attachment information above when drafting your response.';
+    }
+    
+    // Step 4: Process with prompts (same as One Shot)
+    const prompts = loadPrompts();
+    let combinedPrompt = '';
+    const usedPromptNames = [];
+    
+    if (promptIds && promptIds.length > 0) {
+      for (const promptId of promptIds) {
+        const prompt = prompts.find(p => p.id === promptId);
+        if (prompt) {
+          const processedTemplate = replacePlaceholders(prompt.template, emailData);
+          combinedPrompt += `### ${prompt.name}:\n${processedTemplate}\n\n`;
+          usedPromptNames.push(prompt.name);
+          
+          // Increment usage
+          const index = prompts.findIndex(p => p.id === promptId);
+          if (index !== -1) {
+            prompts[index].usageCount = (prompts[index].usageCount || 0) + 1;
+          }
+        }
+      }
+      savePrompts(prompts);
+    }
+    
+    if (!combinedPrompt) {
+      combinedPrompt = 'Please analyze and respond to this email:';
+    }
+    
+    // Add quick notes if provided
+    if (quickNotes && quickNotes.trim()) {
+      combinedPrompt += `\n### Additional Instructions (one-time):\n${quickNotes.trim()}\n`;
+      results.hadQuickNotes = true;
+    }
+    
+    // Add attachment context
+    combinedPrompt += attachmentContext;
+    
+    // Step 5: Process with AI
+    const aiResult = await processWithAI(combinedPrompt, emailData);
+    results.aiResult = aiResult;
+    results.usedPrompts = usedPromptNames;
+    
+    // Clean up temp files
+    for (const attachment of attachments) {
+      try {
+        const attachPath = attachment.savedPath || attachment.tempPath;
+        if (attachPath && fs.existsSync(attachPath)) {
+          fs.unlinkSync(attachPath);
+        }
+      } catch (e) { /* ignore cleanup errors */ }
+    }
+    
+    logger.info('Smart Shot completed', { 
+      attachmentCount: results.attachmentSummaries.length,
+      aiSuccess: aiResult?.success 
+    });
+    
+    return {
+      success: true,
+      ...results,
+    };
+    
+  } catch (error) {
+    logger.error('Smart Shot error', { error: error.message });
+    return { success: false, error: error.message };
+  }
+});
+
 // IPC: Export prompts
 ipcMain.handle('export-prompts', async () => {
   try {
@@ -3292,6 +4286,182 @@ ipcMain.handle('get-email-attachments', async (event, { entryId }) => {
       message: `Error: ${error.message}`,
       attachments: []
     };
+  }
+});
+
+// ============================================================================
+// CONTACT LOOKUP & RESEARCH
+// ============================================================================
+
+// IPC: Lookup contact by email
+ipcMain.handle('lookup-contact', async (event, { email }) => {
+  logger.info('Looking up contact', { email });
+  
+  if (!edge) {
+    return {
+      success: false,
+      found: false,
+      message: 'COM integration not initialized.',
+      contact: null
+    };
+  }
+
+  try {
+    const lookupFunc = createContactLookupFunction();
+    if (!lookupFunc) {
+      return {
+        success: false,
+        found: false,
+        message: 'Could not create lookup function.',
+        contact: null
+      };
+    }
+    
+    const result = await new Promise((resolve, reject) => {
+      lookupFunc({ email }, (error, result) => {
+        if (error) reject(error);
+        else resolve(result);
+      });
+    });
+    
+    logger.info('Contact lookup complete', { found: result.found, source: result.source });
+    return result;
+  } catch (error) {
+    logger.error('Error looking up contact', { error: error.message });
+    return {
+      success: false,
+      found: false,
+      message: `Error: ${error.message}`,
+      contact: null
+    };
+  }
+});
+
+// IPC: Get email history with contact
+ipcMain.handle('get-email-history', async (event, { email }) => {
+  logger.info('Getting email history', { email });
+  
+  if (!edge) {
+    return {
+      success: false,
+      totalCount: 0,
+      inboxCount: 0,
+      sentCount: 0,
+      lastEmailDate: ''
+    };
+  }
+
+  try {
+    const historyFunc = createEmailHistoryFunction();
+    if (!historyFunc) {
+      return {
+        success: false,
+        totalCount: 0,
+        inboxCount: 0,
+        sentCount: 0,
+        lastEmailDate: ''
+      };
+    }
+    
+    const result = await new Promise((resolve, reject) => {
+      historyFunc({ email }, (error, result) => {
+        if (error) reject(error);
+        else resolve(result);
+      });
+    });
+    
+    logger.info('Email history retrieved', { totalCount: result.totalCount });
+    return result;
+  } catch (error) {
+    logger.error('Error getting email history', { error: error.message });
+    return {
+      success: false,
+      totalCount: 0,
+      inboxCount: 0,
+      sentCount: 0,
+      lastEmailDate: '',
+      error: error.message
+    };
+  }
+});
+
+// IPC: Deep research on contact (uses AI)
+ipcMain.handle('research-contact', async (event, { name, email, company, title }) => {
+  logger.info('Researching contact', { name, company });
+  
+  // Rate limiting
+  if (!rateLimiter.check('contact-research')) {
+    return { success: false, error: 'Too many requests. Please wait.' };
+  }
+  
+  try {
+    // Build research prompt
+    const researchPrompt = `Research this person and provide a comprehensive profile:
+
+Name: ${name || 'Unknown'}
+Email: ${email}
+Company: ${company || 'Unknown'}
+Title: ${title || 'Unknown'}
+
+Please find and provide:
+1. **LinkedIn Summary**: Their professional background, experience, education, and skills based on what you can find.
+2. **Company Profile**: Information about ${company || 'their company'} - size, industry, revenue, headquarters, key facts.
+3. **Recent News**: Any recent news mentions of this person or their company.
+4. **Communication Insights**: Based on their role and industry, suggest how to best communicate with them.
+5. **Talking Points**: 3-5 suggested conversation topics based on their background.
+
+Format your response with clear headers for each section. If you cannot find specific information, note what's available and what couldn't be verified.`;
+
+    // Process with AI
+    const result = await processWithAI(researchPrompt, { body: '', subject: 'Contact Research' });
+    
+    if (result.success) {
+      return {
+        success: true,
+        research: result.content,
+        generatedAt: new Date().toISOString()
+      };
+    } else {
+      return {
+        success: false,
+        error: result.error || 'Research failed'
+      };
+    }
+  } catch (error) {
+    logger.error('Error researching contact', { error: error.message });
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
+// IPC: Save research notes to contact
+ipcMain.handle('save-contact-notes', async (event, { email, notes, append }) => {
+  logger.info('Saving contact notes', { email, append });
+  
+  if (!edge) {
+    return { success: false, message: 'COM integration not initialized.' };
+  }
+
+  try {
+    const saveFunc = createSaveContactNotesFunction();
+    if (!saveFunc) {
+      return { success: false, message: 'Could not create save function.' };
+    }
+    
+    const result = await new Promise((resolve, reject) => {
+      saveFunc({ email, notes, append: append !== false }, (error, result) => {
+        if (error) reject(error);
+        else resolve(result);
+      });
+    });
+    
+    logger.info('Contact notes saved', { success: result.success });
+    return result;
+  } catch (error) {
+    logger.error('Error saving contact notes', { error: error.message });
+    return { success: false, message: error.message };
   }
 });
 

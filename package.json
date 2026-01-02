@@ -1,6 +1,6 @@
 {
   "name": "grok-outlook-companion",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "AI-powered email assistant for Microsoft Outlook using Grok AI",
   "main": "main.js",
   "scripts": {
@@ -22,11 +22,15 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "artifactName": "${productName}-Setup-${version}.${ext}"
@@ -93,7 +97,8 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1",
-    "tesseract.js": "^7.0.0"
+    "tesseract.js": "^7.0.0",
+    "xlsx": "^0.18.5"
   },
   "browserslist": {
     "production": [

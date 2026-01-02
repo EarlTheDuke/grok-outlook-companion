@@ -52,11 +52,15 @@ import {
   FolderOpen as FilesIcon,
   ClearAll as ClearAllIcon,
   TextSnippet as PromptsIcon,
+  Person as PersonIcon,
+  Search as SearchIcon,
 } from '@mui/icons-material';
 import Settings from './components/Settings';
 import FilesTab from './components/FilesTab';
 import PromptsTab from './components/PromptsTab';
 import PromptSelector from './components/PromptSelector';
+import ContactCard from './components/ContactCard';
+import InboxTab from './components/InboxTab';
 
 // Tab Panel component
 function TabPanel({ children, value, index, ...other }) {
@@ -213,7 +217,7 @@ function formatDate(dateString) {
 }
 
 // Email detail viewer component
-function EmailViewer({ email, onClose }) {
+function EmailViewer({ email, onClose, onContactClick }) {
   const [expanded, setExpanded] = useState(true);
 
   const copyToClipboard = (text) => {
@@ -252,6 +256,15 @@ function EmailViewer({ email, onClose }) {
           )}
         </Box>
         <Stack direction="row" spacing={1}>
+          <Tooltip title="View contact profile & research">
+            <IconButton 
+              size="small" 
+              onClick={onContactClick}
+              sx={{ color: 'text.secondary', '&:hover': { color: '#3b82f6' } }}
+            >
+              <PersonIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
           <Tooltip title="Copy body to clipboard">
             <IconButton 
               size="small" 
@@ -321,9 +334,17 @@ function App() {
   const [oneShotMode, setOneShotMode] = useState(false);
   const [oneShotStatus, setOneShotStatus] = useState(null); // 'fetching' | 'processing' | 'sending' | null
   
+  // Smart Shot Mode (includes attachment analysis)
+  const [smartShotMode, setSmartShotMode] = useState(false);
+  const [smartShotStatus, setSmartShotStatus] = useState(null); // 'fetching' | 'extracting' | 'analyzing' | 'drafting' | 'sending' | null
+  const [attachmentSummaries, setAttachmentSummaries] = useState([]);
+  
   // Quick Notes (one-time disposable prompt)
   const [quickNotes, setQuickNotes] = useState('');
   const [keepQuickNotes, setKeepQuickNotes] = useState(false);
+  
+  // Contact Card state
+  const [showContactCard, setShowContactCard] = useState(false);
   
   // Email data states
   const [activeEmail, setActiveEmail] = useState(null);
@@ -543,6 +564,7 @@ function App() {
     setInboxEmails([]);
     setSentEmails([]);
     setQuickNotes('');
+    setAttachmentSummaries([]);
     showMessage('info', 'All content cleared');
   }, [showMessage]);
 
@@ -645,7 +667,7 @@ function App() {
       const outlookResult = await window.electronAPI.createReplyInOutlook(
         email.entryId,
         aiResult.content,
-        false // not reply all
+        true // reply all - includes CC recipients
       );
       
       if (outlookResult.success) {
@@ -660,6 +682,112 @@ function App() {
     } finally {
       setLoading(prev => ({ ...prev, active: false, ai: false }));
       setOneShotStatus(null);
+    }
+  };
+
+  // Smart Shot: Fetch → Extract Attachments → Analyze → AI → Outlook
+  const handleSmartShot = async () => {
+    if (!isElectron) {
+      showMessage('warning', 'Running in browser - Electron API not available');
+      return;
+    }
+
+    if (!aiSettings?.hasApiKey && aiSettings?.provider !== 'ollama') {
+      showMessage('warning', 'Please configure your AI settings first (click the gear icon)');
+      return;
+    }
+
+    // Clear previous results
+    setActiveEmail(null);
+    setAiResult(null);
+    setAttachmentSummaries([]);
+    
+    try {
+      // Step 1: Fetch Active Email
+      setSmartShotStatus('fetching');
+      setLoading(prev => ({ ...prev, active: true }));
+      
+      const emailResult = await window.electronAPI.getActiveEmail();
+      
+      if (!emailResult.success) {
+        showMessage('warning', emailResult.message || 'No email selected in Outlook');
+        return;
+      }
+      
+      const email = emailResult.data;
+      setActiveEmail(email);
+      showMessage('info', `🧠 Smart Shot: Got "${email.subject}" - Analyzing attachments...`);
+      
+      // Step 2: Run Smart Shot (handles attachment extraction, analysis, and AI)
+      setSmartShotStatus('extracting');
+      setLoading(prev => ({ ...prev, active: false, ai: true }));
+      
+      // Update status as processing progresses
+      setSmartShotStatus('analyzing');
+      
+      const result = await window.electronAPI.smartShot(email, selectedPromptIds, quickNotes);
+      
+      if (!result.success) {
+        showMessage('error', result.error || 'Smart Shot failed');
+        return;
+      }
+      
+      // Store attachment summaries
+      if (result.attachmentSummaries && result.attachmentSummaries.length > 0) {
+        setAttachmentSummaries(result.attachmentSummaries);
+        showMessage('info', `🧠 Smart Shot: Analyzed ${result.attachmentSummaries.length} attachment(s)`);
+      } else {
+        showMessage('info', '🧠 Smart Shot: No attachments found - using email only');
+      }
+      
+      // Store AI result
+      if (result.aiResult?.success) {
+        setAiResult({
+          type: 'smart-shot',
+          content: result.aiResult.content,
+          email: email.subject,
+          usedPrompts: result.usedPrompts || [],
+          hadQuickNotes: result.hadQuickNotes,
+          attachmentCount: result.attachmentSummaries?.length || 0,
+        });
+      } else {
+        showMessage('error', result.aiResult?.error || 'AI processing failed');
+        return;
+      }
+      
+      // Clear quick notes after use (unless "keep" is checked)
+      if (!keepQuickNotes) {
+        setQuickNotes('');
+      }
+      
+      showMessage('info', '🧠 Smart Shot: AI complete - Opening in Outlook...');
+      
+      // Step 3: Send to Outlook
+      setSmartShotStatus('sending');
+      
+      if (!email.entryId) {
+        showMessage('warning', 'Cannot find original email to reply to');
+        return;
+      }
+      
+      const outlookResult = await window.electronAPI.createReplyInOutlook(
+        email.entryId,
+        result.aiResult.content,
+        true // reply all - includes CC recipients
+      );
+      
+      if (outlookResult.success) {
+        showMessage('success', '🧠 Smart Shot Complete! Reply opened in Outlook.');
+      } else {
+        showMessage('error', outlookResult.message || 'Failed to open in Outlook');
+      }
+      
+    } catch (error) {
+      console.error('Smart Shot error:', error);
+      showMessage('error', `Smart Shot failed: ${error.message}`);
+    } finally {
+      setLoading(prev => ({ ...prev, active: false, ai: false }));
+      setSmartShotStatus(null);
     }
   };
 
@@ -1212,14 +1340,7 @@ function App() {
               <Tab
                 icon={<InboxIcon sx={{ fontSize: 20 }} />}
                 iconPosition="start"
-                label={
-                  <Box sx={{ textAlign: 'left' }}>
-                    <span>{`Recent Inbox ${inboxEmails.length > 0 ? `(${inboxEmails.length})` : ''}`}</span>
-                    <Typography variant="caption" sx={{ display: 'block', fontSize: '0.6rem', color: '#f97316', mt: -0.5 }}>
-                      🚧 coming soon
-                    </Typography>
-                  </Box>
-                }
+                label="Recent Inbox"
               />
               <Tab
                 icon={<SendIcon sx={{ fontSize: 20 }} />}
@@ -1254,60 +1375,140 @@ function App() {
                 {/* Main Content - Left Side */}
                 <Box sx={{ flex: 1, overflow: 'auto' }}>
                   <Stack spacing={3}>
-                    {/* One Shot Toggle */}
-                    <Box
-                      sx={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 2,
-                        p: 1.5,
-                        background: oneShotMode 
-                          ? 'linear-gradient(135deg, rgba(234, 179, 8, 0.15) 0%, rgba(249, 115, 22, 0.1) 100%)'
-                          : 'rgba(39, 39, 42, 0.3)',
-                        border: `1px solid ${oneShotMode ? 'rgba(234, 179, 8, 0.4)' : '#27272a'}`,
-                        borderRadius: 2,
-                      }}
-                    >
-                      <Typography 
-                        variant="body2" 
-                        sx={{ 
-                          fontWeight: 600, 
-                          color: oneShotMode ? '#eab308' : '#71717a',
-                        }}
-                      >
-                        ⚡ One Shot Mode
-                      </Typography>
-                      <Chip
-                        label={oneShotMode ? 'ON' : 'OFF'}
-                        size="small"
-                        onClick={() => setOneShotMode(!oneShotMode)}
+                    {/* Shot Mode Toggles */}
+                    <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                      {/* One Shot Toggle */}
+                      <Box
                         sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 1.5,
+                          p: 1.5,
+                          flex: 1,
+                          minWidth: 280,
+                          background: oneShotMode 
+                            ? 'linear-gradient(135deg, rgba(234, 179, 8, 0.15) 0%, rgba(249, 115, 22, 0.1) 100%)'
+                            : 'rgba(39, 39, 42, 0.3)',
+                          border: `1px solid ${oneShotMode ? 'rgba(234, 179, 8, 0.4)' : '#27272a'}`,
+                          borderRadius: 2,
                           cursor: 'pointer',
-                          background: oneShotMode ? '#eab308' : '#3f3f46',
-                          color: oneShotMode ? '#000' : '#a1a1aa',
-                          fontWeight: 700,
+                          transition: 'all 0.2s',
                           '&:hover': {
-                            background: oneShotMode ? '#facc15' : '#52525b',
+                            borderColor: oneShotMode ? 'rgba(234, 179, 8, 0.6)' : '#3f3f46',
                           },
                         }}
-                      />
-                      <Typography variant="caption" sx={{ color: '#71717a', flex: 1 }}>
-                        {oneShotMode 
-                          ? 'Fetch → AI → Outlook in one click' 
-                          : 'Standard mode (manual steps)'}
-                      </Typography>
-                      {oneShotMode && selectedPromptIds.length === 0 && (
-                        <Chip 
-                          label="⚠️ Select prompts first" 
-                          size="small" 
-                          sx={{ background: 'rgba(239, 68, 68, 0.2)', color: '#ef4444' }} 
+                        onClick={() => {
+                          setOneShotMode(!oneShotMode);
+                          if (!oneShotMode) setSmartShotMode(false); // Turn off Smart Shot if turning on One Shot
+                        }}
+                      >
+                        <Typography 
+                          variant="body2" 
+                          sx={{ fontWeight: 600, color: oneShotMode ? '#eab308' : '#71717a' }}
+                        >
+                          ⚡ One Shot
+                        </Typography>
+                        <Chip
+                          label={oneShotMode ? 'ON' : 'OFF'}
+                          size="small"
+                          sx={{
+                            background: oneShotMode ? '#eab308' : '#3f3f46',
+                            color: oneShotMode ? '#000' : '#a1a1aa',
+                            fontWeight: 700,
+                          }}
                         />
-                      )}
+                        <Typography variant="caption" sx={{ color: '#71717a', flex: 1 }}>
+                          Email → AI → Outlook
+                        </Typography>
+                      </Box>
+
+                      {/* Smart Shot Toggle */}
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 1.5,
+                          p: 1.5,
+                          flex: 1,
+                          minWidth: 280,
+                          background: smartShotMode 
+                            ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(236, 72, 153, 0.1) 100%)'
+                            : 'rgba(39, 39, 42, 0.3)',
+                          border: `1px solid ${smartShotMode ? 'rgba(139, 92, 246, 0.4)' : '#27272a'}`,
+                          borderRadius: 2,
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          '&:hover': {
+                            borderColor: smartShotMode ? 'rgba(139, 92, 246, 0.6)' : '#3f3f46',
+                          },
+                        }}
+                        onClick={() => {
+                          setSmartShotMode(!smartShotMode);
+                          if (!smartShotMode) setOneShotMode(false); // Turn off One Shot if turning on Smart Shot
+                        }}
+                      >
+                        <Typography 
+                          variant="body2" 
+                          sx={{ fontWeight: 600, color: smartShotMode ? '#8b5cf6' : '#71717a' }}
+                        >
+                          🧠 Smart Shot
+                        </Typography>
+                        <Chip
+                          label={smartShotMode ? 'ON' : 'OFF'}
+                          size="small"
+                          sx={{
+                            background: smartShotMode ? '#8b5cf6' : '#3f3f46',
+                            color: smartShotMode ? '#fff' : '#a1a1aa',
+                            fontWeight: 700,
+                          }}
+                        />
+                        <Typography variant="caption" sx={{ color: '#71717a', flex: 1 }}>
+                          + Attachments
+                        </Typography>
+                      </Box>
                     </Box>
+                    
+                    {/* Warning if prompts not selected */}
+                    {(oneShotMode || smartShotMode) && selectedPromptIds.length === 0 && (
+                      <Chip 
+                        label="⚠️ Select prompts first" 
+                        size="small" 
+                        sx={{ background: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', alignSelf: 'flex-start' }} 
+                      />
+                    )}
 
                     <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-                      {/* Main Action Button - changes based on One Shot mode */}
-                      {oneShotMode ? (
+                      {/* Main Action Button - changes based on mode */}
+                      {smartShotMode ? (
+                        <Button
+                          variant="contained"
+                          startIcon={
+                            smartShotStatus ? <CircularProgress size={18} color="inherit" /> : <AIIcon />
+                          }
+                          onClick={handleSmartShot}
+                          disabled={loading.active || loading.ai || selectedPromptIds.length === 0}
+                          sx={{
+                            px: 4,
+                            py: 1.5,
+                            fontSize: '1rem',
+                            fontWeight: 700,
+                            background: 'linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)',
+                            '&:hover': {
+                              background: 'linear-gradient(135deg, #a78bfa 0%, #f472b6 100%)',
+                            },
+                            '&.Mui-disabled': {
+                              background: '#3f3f46',
+                            },
+                          }}
+                        >
+                          {smartShotStatus === 'fetching' ? '🧠 Fetching Email...' :
+                           smartShotStatus === 'extracting' ? '🧠 Extracting Attachments...' :
+                           smartShotStatus === 'analyzing' ? '🧠 Analyzing Files...' :
+                           smartShotStatus === 'drafting' ? '🧠 Drafting Reply...' :
+                           smartShotStatus === 'sending' ? '🧠 Opening Outlook...' :
+                           `🧠 SMART SHOT (${selectedPromptIds.length} prompts)`}
+                        </Button>
+                      ) : oneShotMode ? (
                         <Button
                           variant="contained"
                           startIcon={
@@ -1578,11 +1779,103 @@ function App() {
                               ✏️ Included quick notes
                             </Typography>
                           )}
+                          {aiResult.attachmentCount > 0 && (
+                            <Typography variant="caption" sx={{ display: 'block', color: '#8b5cf6', mt: 0.5 }}>
+                              📎 Analyzed {aiResult.attachmentCount} attachment(s)
+                            </Typography>
+                          )}
                         </Box>
                       </Paper>
                     )}
 
-                    <EmailViewer email={activeEmail} />
+                    {/* Attachment Summaries Panel */}
+                    {attachmentSummaries.length > 0 && (
+                      <Paper
+                        sx={{
+                          p: 2.5,
+                          mb: 2,
+                          background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(236, 72, 153, 0.08) 100%)',
+                          border: '2px solid rgba(139, 92, 246, 0.4)',
+                          borderRadius: 2,
+                        }}
+                      >
+                        <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+                          <Stack direction="row" alignItems="center" spacing={1}>
+                            <Typography variant="h6" sx={{ fontWeight: 700, color: '#8b5cf6' }}>
+                              📎 Attachment Analysis ({attachmentSummaries.length} file{attachmentSummaries.length > 1 ? 's' : ''})
+                            </Typography>
+                          </Stack>
+                          <Tooltip title="Clear attachments">
+                            <IconButton 
+                              size="small" 
+                              onClick={() => setAttachmentSummaries([])}
+                              sx={{ color: '#71717a', '&:hover': { color: '#8b5cf6' } }}
+                            >
+                              <ClearAllIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Stack>
+                        <Stack spacing={2}>
+                          {attachmentSummaries.map((att, index) => (
+                            <Box
+                              key={index}
+                              sx={{
+                                p: 2,
+                                background: 'rgba(15, 15, 18, 0.8)',
+                                borderRadius: 1.5,
+                                border: '1px solid rgba(139, 92, 246, 0.2)',
+                              }}
+                            >
+                              <Stack direction="row" alignItems="center" spacing={1} mb={1}>
+                                <Typography 
+                                  variant="subtitle2" 
+                                  sx={{ 
+                                    fontWeight: 700, 
+                                    color: '#c084fc',
+                                    fontFamily: 'monospace',
+                                  }}
+                                >
+                                  📄 {att.filename}
+                                </Typography>
+                                <Chip
+                                  label={att.type?.toUpperCase() || 'FILE'}
+                                  size="small"
+                                  sx={{
+                                    background: 'rgba(139, 92, 246, 0.3)',
+                                    color: '#c084fc',
+                                    fontSize: '0.65rem',
+                                    height: 20,
+                                  }}
+                                />
+                                {att.charCount && (
+                                  <Typography variant="caption" sx={{ color: '#71717a' }}>
+                                    ({Math.round(att.charCount / 1000)}k chars)
+                                  </Typography>
+                                )}
+                              </Stack>
+                              <Typography
+                                variant="body2"
+                                sx={{
+                                  color: '#a1a1aa',
+                                  whiteSpace: 'pre-wrap',
+                                  fontSize: '0.85rem',
+                                  lineHeight: 1.7,
+                                  maxHeight: 200,
+                                  overflow: 'auto',
+                                }}
+                              >
+                                {att.summary}
+                              </Typography>
+                            </Box>
+                          ))}
+                        </Stack>
+                      </Paper>
+                    )}
+
+                    <EmailViewer 
+                      email={activeEmail} 
+                      onContactClick={() => setShowContactCard(true)}
+                    />
                   </>
                 ) : (
                   <Paper
@@ -1631,60 +1924,14 @@ function App() {
               </Box>
             </TabPanel>
 
-            {/* Recent Inbox Tab */}
+            {/* Recent Inbox Tab - New Enhanced Version */}
             <TabPanel value={tabValue} index={1}>
-              <Stack spacing={3} sx={{ height: '100%', overflow: 'auto' }}>
-                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <Button
-                    variant="contained"
-                    startIcon={loading.inbox ? <CircularProgress size={18} color="inherit" /> : <RefreshIcon />}
-                    onClick={handleFetchInbox}
-                    disabled={loading.inbox || status.outlook !== 'online'}
-                  >
-                    {loading.inbox ? 'Fetching...' : 'Fetch Recent Inbox'}
-                  </Button>
-                  
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 2 }}>
-                    <Typography variant="body2" sx={{ color: 'text.secondary', minWidth: 80 }}>
-                      Days: {daysBack}
-                    </Typography>
-                    <Slider
-                      value={daysBack}
-                      onChange={(e, val) => setDaysBack(val)}
-                      min={7}
-                      max={365}
-                      sx={{ width: 120 }}
-                      size="small"
-                    />
-                  </Box>
-                  
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Typography variant="body2" sx={{ color: 'text.secondary', minWidth: 60 }}>
-                      Max: {maxItems}
-                    </Typography>
-                    <Slider
-                      value={maxItems}
-                      onChange={(e, val) => setMaxItems(val)}
-                      min={10}
-                      max={200}
-                      step={10}
-                      sx={{ width: 100 }}
-                      size="small"
-                    />
-                  </Box>
-                </Box>
-
-                <EmailTable 
-                  emails={inboxEmails} 
-                  onSelectEmail={handleSelectEmail}
-                  selectedId={selectedEmail?.entryId}
-                  loading={loading.inbox}
-                />
-                
-                {selectedEmail && tabValue === 1 && (
-                  <EmailViewer email={selectedEmail} />
-                )}
-              </Stack>
+              <InboxTab
+                showMessage={showMessage}
+                aiSettings={aiSettings}
+                selectedPromptIds={selectedPromptIds}
+                allPrompts={allPrompts}
+              />
             </TabPanel>
 
             {/* Sent Items Tab */}
@@ -1843,6 +2090,28 @@ function App() {
             </Typography>
           </Stack>
         </DialogContent>
+      </Dialog>
+
+      {/* Contact Card Dialog */}
+      <Dialog
+        open={showContactCard && !!activeEmail}
+        onClose={() => setShowContactCard(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            background: 'transparent',
+            boxShadow: 'none',
+            overflow: 'visible',
+          }
+        }}
+      >
+        <ContactCard
+          email={activeEmail?.senderEmail}
+          senderName={activeEmail?.senderName}
+          onClose={() => setShowContactCard(false)}
+          showMessage={showMessage}
+        />
       </Dialog>
     </Box>
   );
