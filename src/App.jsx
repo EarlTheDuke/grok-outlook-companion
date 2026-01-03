@@ -1094,7 +1094,7 @@ function App() {
   };
 
   // Send AI draft reply to Outlook
-  const sendDraftToOutlook = async (replyAll = false) => {
+  const sendDraftToOutlook = async (replyAll = true) => {
     if (!isElectron || !aiResult?.content) return;
     
     const email = activeEmail || selectedEmail;
@@ -1719,7 +1719,7 @@ function App() {
                                 variant="contained"
                                 size="small"
                                 startIcon={<OpenInOutlookIcon />}
-                                onClick={() => sendDraftToOutlook(false)}
+                                onClick={() => sendDraftToOutlook(true)}
                                 sx={{
                                   background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
                                   '&:hover': {

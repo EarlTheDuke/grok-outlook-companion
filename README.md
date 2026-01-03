@@ -4,7 +4,7 @@
 
 A Windows desktop application that integrates with Microsoft Outlook to provide intelligent email processing using Grok AI (xAI), with support for local AI models via Ollama.
 
-![Version](https://img.shields.io/badge/version-2.2.0-orange)
+![Version](https://img.shields.io/badge/version-2.2.1-orange)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -391,7 +391,11 @@ MIT License - See [LICENSE](LICENSE) file for details.
 
 ## 📝 Version History
 
-### v2.2.0 (Current)
+### v2.2.1 (Current)
+- 📧 **Reply All by Default** - All reply actions now include CC recipients
+- Fixed inconsistent reply behavior across app modes
+
+### v2.2.0
 - 🌐 **Open WebUI Support** - Connect to Open WebUI with API key authentication
 - Supports private network IPs (10.x, 192.168.x, 172.16-31.x)
 - Improved API key helper text for each provider
