@@ -4,7 +4,7 @@
 
 A Windows desktop application that integrates with Microsoft Outlook to provide intelligent email processing using Grok AI (xAI), with support for local AI models via Ollama.
 
-![Version](https://img.shields.io/badge/version-2.1.0-orange)
+![Version](https://img.shields.io/badge/version-2.2.0-orange)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -199,11 +199,31 @@ In **Settings**:
 | Provider | Setup |
 |----------|-------|
 | **Grok (xAI)** | Enter API key from [console.x.ai](https://console.x.ai) |
-| **Ollama (Local/Network)** | Local or network Ollama server (no API key needed) |
+| **Ollama (Direct)** | Direct connection to Ollama server (no API key needed) |
+| **Open WebUI** | Connect to Open WebUI with API key authentication (v2.2+) |
 | **OpenAI** | Enter API key from [platform.openai.com](https://platform.openai.com) |
 | **Custom** | Configure any OpenAI-compatible API endpoint |
 
-### 🖧 Using Ollama on a Network Server (v2.1+)
+### 🌐 Using Open WebUI (v2.2+)
+
+If you have [Open WebUI](https://github.com/open-webui/open-webui) running on your network:
+
+1. **Get your API key** from Open WebUI:
+   - Log in to Open WebUI (e.g., `http://10.0.100.244:8080`)
+   - Go to **Profile → Settings → Account → API Keys**
+   - Click **Generate New API Key** and copy it
+
+2. **Configure the app**:
+   - Go to Settings → AI Provider
+   - Select **"Open WebUI"**
+   - Enter your Server URL: `http://YOUR-IP:8080/api/chat/completions`
+   - Enter your API key
+   - Set your model name exactly as shown in Open WebUI (e.g., `llama3.3`, `mistral:latest`)
+   - Save Settings
+
+> **Note:** Model names must match exactly what's shown in Open WebUI, including tags like `:latest` or `:2b`
+
+### 🖧 Using Ollama Direct (v2.1+)
 
 If you have Ollama running on another computer in your network:
 
@@ -249,7 +269,9 @@ This allows you to use a powerful AI server on your network without needing inte
 
 The app only connects to:
 - `api.x.ai` - Grok AI API (HTTPS)
-- `localhost:11434` - Ollama (if using local AI)
+- `api.openai.com` - OpenAI API (HTTPS)
+- `localhost:11434` - Ollama Direct (if using local AI)
+- Private network IPs - Open WebUI/Ollama on your LAN (10.x.x.x, 192.168.x.x, 172.16-31.x.x)
 
 ---
 
@@ -369,7 +391,13 @@ MIT License - See [LICENSE](LICENSE) file for details.
 
 ## 📝 Version History
 
-### v2.1.0 (Current)
+### v2.2.0 (Current)
+- 🌐 **Open WebUI Support** - Connect to Open WebUI with API key authentication
+- Supports private network IPs (10.x, 192.168.x, 172.16-31.x)
+- Improved API key helper text for each provider
+- Updated Draft Reply prompt for better thread handling
+
+### v2.1.0
 - 🖧 **Network Ollama Support** - Connect to Ollama running on another computer
 - Editable Ollama server URL in settings
 - OpenAI provider option added

@@ -473,12 +473,14 @@ async function processWithAI(prompt, emailData) {
   if (provider === 'ollama') {
     return await processWithOllama(model, endpoint, messages);
   } else {
-    // Grok, OpenAI, or custom - all use the same API format
+    // Grok, OpenAI, Open WebUI, or custom - all use the same OpenAI-compatible API format
     const apiKey = await getApiKey(provider);
     if (!apiKey) {
       return {
         success: false,
-        error: 'API key not configured. Please set your API key in Settings.',
+        error: provider === 'openwebui' 
+          ? 'API key not configured. Get your key from Open WebUI → Profile → Settings → Account → API Keys'
+          : 'API key not configured. Please set your API key in Settings.',
       };
     }
     return await processWithGrokAPI(apiKey, model, endpoint, messages);
@@ -2716,7 +2718,7 @@ ipcMain.handle('get-ai-settings', async () => {
 ipcMain.handle('save-ai-settings', async (event, settings) => {
   try {
     // SECURITY: Input validation
-    if (settings.provider && !['grok', 'ollama', 'openai', 'custom'].includes(settings.provider)) {
+    if (settings.provider && !['grok', 'ollama', 'openwebui', 'openai', 'custom'].includes(settings.provider)) {
       return { success: false, error: 'Invalid AI provider.' };
     }
     
@@ -2732,11 +2734,16 @@ ipcMain.handle('save-ai-settings', async (event, settings) => {
     if (settings.endpoint) {
       try {
         const url = new URL(settings.endpoint);
-        // Only allow HTTPS (except for localhost/Ollama)
-        if (!url.protocol.startsWith('https') && 
-            !url.hostname.includes('localhost') && 
-            !url.hostname.includes('127.0.0.1')) {
-          return { success: false, error: 'API endpoint must use HTTPS.' };
+        // Allow HTTP for localhost and private network IPs (for Ollama/Open WebUI)
+        const isLocalOrPrivate = 
+            url.hostname === 'localhost' || 
+            url.hostname === '127.0.0.1' ||
+            url.hostname.startsWith('10.') ||           // 10.x.x.x private range
+            url.hostname.startsWith('192.168.') ||      // 192.168.x.x private range
+            /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(url.hostname);  // 172.16-31.x.x private range
+        
+        if (!url.protocol.startsWith('https') && !isLocalOrPrivate) {
+          return { success: false, error: 'API endpoint must use HTTPS (except for local/network servers).' };
         }
       } catch {
         return { success: false, error: 'Invalid API endpoint URL.' };
@@ -3160,8 +3167,8 @@ const DEFAULT_PROMPTS = [
   {
     id: 'core-reply',
     name: 'Draft Reply',
-    description: 'Draft a reply to this email',
-    template: 'Please draft a professional reply to this email.\n\nIMPORTANT FORMATTING RULES:\n- Write ONLY the reply body text\n- Do NOT include subject line, email headers, or "Subject:" prefix\n- Do NOT include a signature (it will be added automatically)\n- Do NOT use markdown formatting (no **, *, [], or <>)\n- Do NOT wrap URLs in brackets or angle brackets\n- Write in plain text format\n\nOriginal email from {sender}:\n{email_body}',
+    description: 'Draft a reply to the most recent message in the thread',
+    template: 'Draft a reply to the most recent message in this email thread.\n\nInstructions:\n- Respond ONLY to the last/most recent person who wrote\n- Read the full thread for context but reply to the latest message\n- Do NOT include: subject line, email headers, "Re:", or any name or signature/sign-off (my email signature is added automatically)\n- Start directly with the response content\n- Keep it concise and professional\n\nEmail thread:\n{email_body}',
     category: 'reply',
     isFavorite: true,
     usageCount: 0,

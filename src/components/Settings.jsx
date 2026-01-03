@@ -43,7 +43,8 @@ import {
 
 const AI_PROVIDERS = [
   { id: 'grok', name: 'Grok (xAI)', model: 'grok-4', endpoint: 'https://api.x.ai/v1/chat/completions' },
-  { id: 'ollama', name: 'Ollama (Local/Network)', model: 'llama3.2', endpoint: 'http://localhost:11434/api/chat', editableEndpoint: true },
+  { id: 'ollama', name: 'Ollama (Direct)', model: 'llama3.2', endpoint: 'http://localhost:11434/api/chat', editableEndpoint: true },
+  { id: 'openwebui', name: 'Open WebUI', model: 'llama3.3', endpoint: 'http://localhost:8080/api/chat/completions', editableEndpoint: true },
   { id: 'openai', name: 'OpenAI', model: 'gpt-4', endpoint: 'https://api.openai.com/v1/chat/completions' },
   { id: 'custom', name: 'Custom API', model: '', endpoint: '' },
 ];
@@ -160,6 +161,11 @@ function Settings({ open, onClose, settings, onSaveSettings }) {
       // This preserves custom network Ollama endpoints
       if (provider === 'ollama') {
         if (!endpoint || !endpoint.includes('11434')) {
+          setEndpoint(providerConfig.endpoint);
+        }
+      } else if (provider === 'openwebui') {
+        // For Open WebUI, preserve custom endpoints (check for port 8080 or /api/chat/completions)
+        if (!endpoint || (!endpoint.includes('8080') && !endpoint.includes('/api/chat/completions'))) {
           setEndpoint(providerConfig.endpoint);
         }
       } else {
@@ -486,6 +492,8 @@ function Settings({ open, onClose, settings, onSaveSettings }) {
                     ? 'Get your API key from console.x.ai' 
                     : provider === 'openai'
                     ? 'Get your API key from platform.openai.com'
+                    : provider === 'openwebui'
+                    ? 'Get your API key from Open WebUI → Settings → Account'
                     : 'Enter your API key'
                 }
                 sx={{ mb: 3 }}
@@ -507,6 +515,12 @@ function Settings({ open, onClose, settings, onSaveSettings }) {
               </Alert>
             )}
 
+            {provider === 'openwebui' && (
+              <Alert severity="info" sx={{ mb: 3 }}>
+                <strong>API key required!</strong> Get your key from Open WebUI → Profile → Settings → Account → API Keys
+              </Alert>
+            )}
+
             {/* Ollama Endpoint (editable for network access) */}
             {provider === 'ollama' && (
               <TextField
@@ -516,6 +530,19 @@ function Settings({ open, onClose, settings, onSaveSettings }) {
                 onChange={(e) => setEndpoint(e.target.value)}
                 placeholder="http://localhost:11434/api/chat"
                 helperText="Use localhost for local, or IP address for network (e.g., http://192.168.1.100:11434/api/chat)"
+                sx={{ mb: 3 }}
+              />
+            )}
+
+            {/* Open WebUI Endpoint */}
+            {provider === 'openwebui' && (
+              <TextField
+                fullWidth
+                label="Open WebUI Server URL"
+                value={endpoint}
+                onChange={(e) => setEndpoint(e.target.value)}
+                placeholder="http://10.0.100.244:8080/api/chat/completions"
+                helperText="Your Open WebUI server address (e.g., http://10.0.100.244:8080/api/chat/completions)"
                 sx={{ mb: 3 }}
               />
             )}
@@ -533,6 +560,8 @@ function Settings({ open, onClose, settings, onSaveSettings }) {
                   ? 'e.g., grok-4, grok-3' 
                   : provider === 'ollama'
                   ? 'e.g., llama3.2, mistral, codellama, qwen2.5'
+                  : provider === 'openwebui'
+                  ? 'Exact model name from Open WebUI (e.g., llama3.3, mistral:latest, qwen3-vl:2b)'
                   : 'Enter the model name'
               }
               sx={{ mb: 3 }}
